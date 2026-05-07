@@ -275,16 +275,6 @@ export const ViewHolderCollection = <TItem,>(
   const [, bumpSortVersion] = useReducer((x: number) => x + 1, 0);
 
   const doSort = useCallback(() => {
-    const now = new Date();
-
-    const time =
-      String(now.getHours()).padStart(2, "0") +
-      ":" +
-      String(now.getMinutes()).padStart(2, "0") +
-      ":" +
-      String(now.getSeconds()).padStart(2, "0");
-
-    console.log("FlashList: ", time);
     const entries = renderEntriesRef.current;
     const direction = inverted ? -1 : 1;
     const isSorted = entries.every(
@@ -307,13 +297,7 @@ export const ViewHolderCollection = <TItem,>(
 
   const maybeDoSortOnFocus = useCallback(() => {
     clearPendingSort();
-    console.log("FlashList🔥: ", {
-      isScrolling: isScrolling(),
-      isScrollingProgrammatically: isScrollingProgrammatically(),
-      shouldSortOnNextFocusRef: shouldSortOnNextFocusRef.current,
-    });
     if (isScrollingProgrammatically()) {
-      console.log("FlashList isScrollingProgrammatically 🔥");
       runAfterProgrammaticScroll(schedulePendingSort);
       return;
     }
@@ -333,22 +317,15 @@ export const ViewHolderCollection = <TItem,>(
   ]);
   const maybeDoSortOnScroll = useCallback(() => {
     shouldSortOnNextFocusRef.current = true;
-    console.log("FlashList✨: ", {
-      isScrolling: isScrolling(),
-      isScrollingProgrammatically: isScrollingProgrammatically(),
-      shouldSortOnNextFocusRef: shouldSortOnNextFocusRef.current,
-    });
     // Evict any stale timer from a previous scroll's drain so it can't
     // fire mid-scroll during rapid-fire arrow nav (where `isMomentumEnd`
     // doesn't fire between key presses).
     clearPendingSort();
     if (isScrollingProgrammatically()) {
-      console.log("FlashList isScrollingProgrammatically ✨");
       runAfterProgrammaticScroll(schedulePendingSort);
       return;
     }
     if (isScrolling()) {
-      console.log("FlashList isScrolling ✨");
       // Focus-induced auto-scroll-into-view: sort sync to keep DOM
       // aligned for the next Tab. User-driven scrolls (negative Δ or Δ
       // past the window) defer to avoid sorting mid-mousewheel.
@@ -356,12 +333,6 @@ export const ViewHolderCollection = <TItem,>(
       const scrollNow =
         scrollSinceFocus >= 0 &&
         scrollSinceFocus < FOCUS_INDUCED_SCROLL_WINDOW_MS;
-      console.warn("FlashList maybeDoSortOnScroll isScrolling branch", {
-        lastFocusTime: lastFocusTimeRef.current,
-        lastScrollTime: getLastScrollTime(),
-        scrollSinceFocus,
-        verdict: scrollNow ? "sort" : "defer",
-      });
       if (scrollNow) {
         doSort();
         shouldSortOnNextFocusRef.current = false;
@@ -417,7 +388,6 @@ export const ViewHolderCollection = <TItem,>(
       if (isSameLogicalRow || isPhantomMutationFocus) {
         return;
       }
-      // console.log("FlashList focusEvent");
       lastFocusedIndexRef.current = focusedIndex;
       lastFocusedDepthRef.current = focusedDepth;
       lastFocusTimeRef.current = Date.now();
