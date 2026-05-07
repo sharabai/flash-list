@@ -46,11 +46,26 @@ export function useRecyclerViewController<T>(
   recyclerViewManager: RecyclerViewManager<T>,
   ref: React.Ref<FlashListRef<T>>,
   scrollViewRef: RefObject<CompatScroller>,
-  scrollAnchorRef: React.RefObject<ScrollAnchorRef>
+  scrollAnchorRef: React.RefObject<ScrollAnchorRef>,
 ) {
   const isUnmounted = useUnmountFlag();
   const [_, setRenderId] = useState(0);
   const pauseOffsetCorrection = useRef(false);
+  // True while a `scrollToIndex` / `scrollToOffset` smooth scroll is in
+  // flight. Cleared exactly once on `isMomentumEnd` via
+  // `notifyProgrammaticScrollSettled`.
+  const isProgrammaticScrollActiveRef = useRef(false);
+  // Set by `queueProgrammaticScroll()` to announce an imminent scroll.
+  // Handed off to `isProgrammaticScrollActiveRef` at `scrollToIndex` entry.
+  const isProgrammaticScrollQueuedRef = useRef(false);
+  // Source-agnostic "viewport in motion" flag.
+  const isScrollingRef = useRef(false);
+  // Timestamp of the most recent scroll event; used to correlate scroll
+  // and focus events for the focus-induced-scroll heuristic.
+  const lastScrollTimeRef = useRef(0);
+  // Holds at most one callback registered via `runAfterProgrammaticScroll`,
+  // drained from `notifyProgrammaticScrollSettled`.
+  const pendingAfterScrollRef = useRef<(() => void) | null>(null);
   const lastDataLengthRef = useRef(recyclerViewManager.getDataLength());
   const { setTimeout } = useUnmountAwareTimeout();
 
@@ -86,7 +101,7 @@ export function useRecyclerViewController<T>(
         callback();
       }
     },
-    [recyclerViewManager]
+    [recyclerViewManager],
   );
 
   const computeFirstVisibleIndexForOffsetCorrection = useCallback(() => {
@@ -99,7 +114,7 @@ export function useRecyclerViewController<T>(
       // Update the tracked first visible item
       const firstVisibleIndex = Math.max(
         0,
-        recyclerViewManager.computeVisibleIndices().startIndex
+        recyclerViewManager.computeVisibleIndices().startIndex,
       );
       if (firstVisibleIndex !== undefined && firstVisibleIndex >= 0) {
         firstVisibleItemKey.current =
@@ -152,13 +167,13 @@ export function useRecyclerViewController<T>(
             .findValue(
               (index) =>
                 recyclerViewManager.getDataKey(index) ===
-                firstVisibleItemKey.current
+                firstVisibleItemKey.current,
             ) ??
           (hasDataChanged || recyclerViewManager.ignoreScrollEvents
             ? data?.findIndex(
                 (item, index) =>
                   recyclerViewManager.getDataKey(index) ===
-                  firstVisibleItemKey.current
+                  firstVisibleItemKey.current,
               )
             : undefined);
 
@@ -199,7 +214,7 @@ export function useRecyclerViewController<T>(
             if (hasDataChanged) {
               updateScrollOffsetWithCallback(
                 recyclerViewManager.getAbsoluteLastScrollOffset() + diff,
-                () => {}
+                () => {},
               );
               recyclerViewManager.ignoreScrollEvents = true;
               setTimeout(() => {
@@ -221,6 +236,45 @@ export function useRecyclerViewController<T>(
     updateScrollOffsetWithCallback,
     computeFirstVisibleIndexForOffsetCorrection,
   ]);
+
+  const isScrollingProgrammatically = useCallback(
+    () =>
+      isProgrammaticScrollActiveRef.current ||
+      isProgrammaticScrollQueuedRef.current,
+    [],
+  );
+
+  const isScrolling = useCallback(() => isScrollingRef.current, []);
+
+  const runAfterProgrammaticScroll = useCallback((cb: () => void) => {
+    pendingAfterScrollRef.current = cb;
+  }, []);
+
+  // Public API; see `FlashListRef#queueProgrammaticScroll`.
+  const queueProgrammaticScroll = useCallback(() => {
+    isProgrammaticScrollQueuedRef.current = true;
+  }, []);
+
+  // Invoked from `RecyclerView.onScrollHandler` on `isMomentumEnd` (~100ms
+  // after the last scroll event). Drains the pending callback if any.
+  const notifyProgrammaticScrollSettled = useCallback(() => {
+    isProgrammaticScrollActiveRef.current = false;
+    isProgrammaticScrollQueuedRef.current = false;
+    const cb = pendingAfterScrollRef.current;
+    pendingAfterScrollRef.current = null;
+    cb?.();
+  }, []);
+
+  const notifyScrollActive = useCallback(() => {
+    isScrollingRef.current = true;
+    lastScrollTimeRef.current = Date.now();
+  }, []);
+
+  const notifyScrollSettled = useCallback(() => {
+    isScrollingRef.current = false;
+  }, []);
+
+  const getLastScrollTime = useCallback(() => lastScrollTimeRef.current, []);
 
   const handlerMethods: FlashListRef<T> = useMemo(() => {
     return {
@@ -245,7 +299,7 @@ export function useRecyclerViewController<T>(
               adjustOffsetForRTL(
                 offset,
                 recyclerViewManager.getChildContainerDimensions().width,
-                recyclerViewManager.getWindowSize().width
+                recyclerViewManager.getWindowSize().width,
               ) +
               (skipFirstItemOffset
                 ? recyclerViewManager.firstItemOffset
@@ -313,6 +367,12 @@ export function useRecyclerViewController<T>(
       },
 
       /**
+       * Announces an imminent programmatic scroll. See
+       * `FlashListRef#queueProgrammaticScroll` for full semantics.
+       */
+      queueProgrammaticScroll,
+
+      /**
        * Scrolls to a specific index in the list.
        * Supports viewPosition and viewOffset for precise positioning.
        * Returns a Promise that resolves when the scroll is complete.
@@ -333,6 +393,11 @@ export function useRecyclerViewController<T>(
             // Pause the scroll offset adjustments
             pauseOffsetCorrection.current = true;
             recyclerViewManager.setOffsetProjectionEnabled(false);
+            // Cleared on `isMomentumEnd` via `notifyProgrammaticScrollSettled`.
+            // Hand off "queued" → "active" here so any stale queue flag
+            // can't gate sorts indefinitely.
+            isProgrammaticScrollQueuedRef.current = false;
+            isProgrammaticScrollActiveRef.current = true;
 
             const getFinalOffset = () => {
               const layout = recyclerViewManager.getLayout(index);
@@ -373,13 +438,13 @@ export function useRecyclerViewController<T>(
               if (finalOffset > lastScrollOffset) {
                 lastScrollOffset = Math.max(
                   finalOffset - bufferForCompute,
-                  lastScrollOffset
+                  lastScrollOffset,
                 );
                 recyclerViewManager.setScrollDirection("forward");
               } else {
                 lastScrollOffset = Math.min(
                   finalOffset + bufferForCompute,
-                  lastScrollOffset
+                  lastScrollOffset,
                 );
                 recyclerViewManager.setScrollDirection("backward");
               }
@@ -488,7 +553,7 @@ export function useRecyclerViewController<T>(
                   recyclerViewManager.setOffsetProjectionEnabled(true);
                   resolve(); // Resolve the promise after re-enabling corrections
                 },
-                animated ? 300 : 200
+                animated ? 300 : 200,
               );
             };
 
@@ -570,6 +635,7 @@ export function useRecyclerViewController<T>(
     setTimeout,
     isUnmounted,
     updateScrollOffsetWithCallback,
+    queueProgrammaticScroll,
   ]);
 
   const applyInitialScrollIndex = useCallback(() => {
@@ -630,7 +696,7 @@ export function useRecyclerViewController<T>(
       });
       return imperativeApi;
     },
-    [handlerMethods, scrollViewRef, recyclerViewManager]
+    [handlerMethods, scrollViewRef, recyclerViewManager],
   );
 
   return {
@@ -638,5 +704,12 @@ export function useRecyclerViewController<T>(
     computeFirstVisibleIndexForOffsetCorrection,
     applyInitialScrollIndex,
     handlerMethods,
+    isScrollingProgrammatically,
+    isScrolling,
+    runAfterProgrammaticScroll,
+    notifyProgrammaticScrollSettled,
+    notifyScrollActive,
+    notifyScrollSettled,
+    getLastScrollTime,
   };
 }

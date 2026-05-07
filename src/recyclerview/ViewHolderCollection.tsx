@@ -4,7 +4,15 @@
  * and coordinates with the RecyclerView context for layout changes.
  */
 
-import React, { useEffect, useImperativeHandle, useLayoutEffect } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+} from "react";
+import { Platform } from "react-native";
 
 import { FlashListProps } from "../FlashListProps";
 
@@ -58,6 +66,14 @@ export interface ViewHolderCollectionProps<TItem> {
   isInLastRow: (index: number) => boolean;
   /** Whether the list is inverted */
   inverted: FlashListProps<TItem>["inverted"];
+  /** True while a programmatic scroll is queued or in flight. */
+  isScrollingProgrammatically: () => boolean;
+  /** True while any scroll is in flight. */
+  isScrolling: () => boolean;
+  /** Register a callback to run when the current programmatic-scroll animation settles. */
+  runAfterProgrammaticScroll: (cb: () => void) => void;
+  /** Returns the timestamp (`Date.now()`) of the most recent scroll event, or 0 if none. */
+  getLastScrollTime: () => number;
 }
 
 /**
@@ -68,13 +84,88 @@ export interface ViewHolderCollectionRef {
   commitLayout: () => void;
 }
 
+const SORT_DELAY_MS = 1000;
+// Max gap from last `focusin` to last `scroll` event for the scroll to
+// count as a focus-induced auto-scroll-into-view (vs a user-driven scroll).
+const FOCUS_INDUCED_SCROLL_WINDOW_MS = 30;
+
+/**
+ * Single-slot setTimeout with a fire-time gate. Calling `schedule` again
+ * replaces any pending fire. When the timer expires, if `shouldDefer()`
+ * returns true the timer reschedules itself instead of invoking
+ * `callback`. Auto-cancels on unmount.
+ *
+ * @returns A tuple of `[schedule, cancel]`. `schedule` arms (or re-arms)
+ * the timer; `cancel` evicts whatever is in the slot.
+ */
+function useDeferredCallback(
+  callback: () => void,
+  delayMs: number,
+  shouldDefer: () => boolean,
+): readonly [schedule: () => void, cancel: () => void] {
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancel = useCallback(() => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  const schedule = useCallback(() => {
+    cancel();
+    timeoutRef.current = setTimeout(() => {
+      if (shouldDefer()) {
+        schedule();
+        return;
+      }
+      timeoutRef.current = null;
+      callback();
+    }, delayMs);
+  }, [callback, delayMs, shouldDefer, cancel]);
+
+  useEffect(() => cancel, [cancel]);
+
+  return [schedule, cancel];
+}
+
+/**
+ * Walks up from `target` to find a `data-flashlist-index` marker among
+ * a parent's direct children, returning the marker's `index` and the
+ * walk-up `depth` (number of `parentElement` hops). Iterates siblings
+ * last-to-first — the marker sits between `{children}` and `{separator}`
+ * inside the ViewHolder, so it's near the end. Returns `null` if no
+ * marker is found before reaching `root`.
+ */
+function findFocusedIndexFromMarker(
+  target: Element | null,
+  root: Element | null,
+): { index: number; depth: number } | null {
+  let current: Element | null = target;
+  let depth = 0;
+  while (current && current !== root) {
+    const parent: Element | null = current.parentElement;
+    if (!parent) break;
+    for (let i = parent.children.length - 1; i >= 0; i--) {
+      const child = parent.children[i] as HTMLElement;
+      const idxStr = child.dataset?.flashlistIndex;
+      if (idxStr != null) {
+        return { index: Number(idxStr), depth };
+      }
+    }
+    current = parent;
+    depth++;
+  }
+  return null;
+}
+
 /**
  * ViewHolderCollection component that manages the rendering of multiple ViewHolder instances
  * and handles layout updates for the entire collection
  * @template TItem - The type of items in the data array
  */
 export const ViewHolderCollection = <TItem,>(
-  props: ViewHolderCollectionProps<TItem>
+  props: ViewHolderCollectionProps<TItem>,
 ) => {
   const {
     data,
@@ -96,6 +187,10 @@ export const ViewHolderCollection = <TItem,>(
     hideStickyHeaderRelatedCell,
     isInLastRow,
     inverted,
+    isScrollingProgrammatically,
+    isScrolling,
+    runAfterProgrammaticScroll,
+    getLastScrollTime,
   } = props;
 
   const [renderId, setRenderId] = React.useState(0);
@@ -145,7 +240,7 @@ export const ViewHolderCollection = <TItem,>(
         setRenderId((prev) => prev + 1);
       },
     }),
-    [setRenderId]
+    [setRenderId],
   );
 
   const hasData = data && data.length > 0;
@@ -171,11 +266,183 @@ export const ViewHolderCollection = <TItem,>(
   //   })
   // );
 
+  const containerRef = useRef<CompatView>(null);
+  const lastFocusTimeRef = useRef(0);
+  const lastFocusedIndexRef = useRef<number | null>(null);
+  const lastFocusedDepthRef = useRef<number | null>(null);
+  const shouldSortOnNextFocusRef = useRef(false);
+  const renderEntriesRef = useRef(Array.from(renderStack.entries()));
+  const [, bumpSortVersion] = useReducer((x: number) => x + 1, 0);
+
+  const doSort = useCallback(() => {
+    const now = new Date();
+
+    const time =
+      String(now.getHours()).padStart(2, "0") +
+      ":" +
+      String(now.getMinutes()).padStart(2, "0") +
+      ":" +
+      String(now.getSeconds()).padStart(2, "0");
+
+    console.log("FlashList: ", time);
+    const entries = renderEntriesRef.current;
+    const direction = inverted ? -1 : 1;
+    const isSorted = entries.every(
+      (entry, i) =>
+        i === 0 || direction * (entries[i - 1][1].index - entry[1].index) <= 0,
+    );
+    if (isSorted) {
+      return;
+    }
+    entries.sort(([, a], [, b]) => direction * (a.index - b.index));
+    bumpSortVersion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inverted]);
+
+  const [schedulePendingSort, clearPendingSort] = useDeferredCallback(
+    doSort,
+    SORT_DELAY_MS,
+    isScrolling,
+  );
+
+  const maybeDoSortOnFocus = useCallback(() => {
+    clearPendingSort();
+    console.log("FlashList🔥: ", {
+      isScrolling: isScrolling(),
+      isScrollingProgrammatically: isScrollingProgrammatically(),
+      shouldSortOnNextFocusRef: shouldSortOnNextFocusRef.current,
+    });
+    if (isScrollingProgrammatically()) {
+      console.log("FlashList isScrollingProgrammatically 🔥");
+      runAfterProgrammaticScroll(schedulePendingSort);
+      return;
+    }
+    if (shouldSortOnNextFocusRef.current) {
+      shouldSortOnNextFocusRef.current = false;
+      doSort();
+    }
+    schedulePendingSort();
+  }, [
+    isScrollingProgrammatically,
+    isScrolling,
+    runAfterProgrammaticScroll,
+    schedulePendingSort,
+    clearPendingSort,
+    doSort,
+    getLastScrollTime,
+  ]);
+  const maybeDoSortOnScroll = useCallback(() => {
+    shouldSortOnNextFocusRef.current = true;
+    console.log("FlashList✨: ", {
+      isScrolling: isScrolling(),
+      isScrollingProgrammatically: isScrollingProgrammatically(),
+      shouldSortOnNextFocusRef: shouldSortOnNextFocusRef.current,
+    });
+    // Evict any stale timer from a previous scroll's drain so it can't
+    // fire mid-scroll during rapid-fire arrow nav (where `isMomentumEnd`
+    // doesn't fire between key presses).
+    clearPendingSort();
+    if (isScrollingProgrammatically()) {
+      console.log("FlashList isScrollingProgrammatically ✨");
+      runAfterProgrammaticScroll(schedulePendingSort);
+      return;
+    }
+    if (isScrolling()) {
+      console.log("FlashList isScrolling ✨");
+      // Focus-induced auto-scroll-into-view: sort sync to keep DOM
+      // aligned for the next Tab. User-driven scrolls (negative Δ or Δ
+      // past the window) defer to avoid sorting mid-mousewheel.
+      const scrollSinceFocus = getLastScrollTime() - lastFocusTimeRef.current;
+      const scrollNow =
+        scrollSinceFocus >= 0 &&
+        scrollSinceFocus < FOCUS_INDUCED_SCROLL_WINDOW_MS;
+      console.warn("FlashList maybeDoSortOnScroll isScrolling branch", {
+        lastFocusTime: lastFocusTimeRef.current,
+        lastScrollTime: getLastScrollTime(),
+        scrollSinceFocus,
+        verdict: scrollNow ? "sort" : "defer",
+      });
+      if (scrollNow) {
+        doSort();
+        shouldSortOnNextFocusRef.current = false;
+        return;
+      }
+    }
+    schedulePendingSort();
+  }, [
+    isScrollingProgrammatically,
+    isScrolling,
+    runAfterProgrammaticScroll,
+    schedulePendingSort,
+    clearPendingSort,
+    doSort,
+    getLastScrollTime,
+  ]);
+
+  if (Platform.OS === "web") {
+    // Reconcile: remove stale keys, append new keys
+    const existingKeys = new Set(renderEntriesRef.current.map(([key]) => key));
+    renderEntriesRef.current = renderEntriesRef.current.filter(([key]) =>
+      renderStack.has(key),
+    );
+    for (const key of renderStack.keys()) {
+      if (!existingKeys.has(key)) {
+        renderEntriesRef.current.push([key, renderStack.get(key)!]);
+      }
+    }
+  } else {
+    renderEntriesRef.current = Array.from(renderStack.entries());
+  }
+
+  useEffect(() => {
+    const container = containerRef.current as HTMLElement | null;
+    if (Platform.OS !== "web" || !container) {
+      return;
+    }
+    const onFocusIn = (e: FocusEvent) => {
+      // Filter spurious focusins (recycle re-focus, mutation-phase
+      // phantoms).
+      const focused = findFocusedIndexFromMarker(
+        e.target as Element | null,
+        containerRef.current as unknown as Element | null,
+      );
+      const focusedIndex = focused?.index ?? null;
+      const focusedDepth = focused?.depth ?? null;
+      const isSameLogicalRow =
+        focusedIndex !== null &&
+        focusedIndex === lastFocusedIndexRef.current &&
+        focusedDepth === lastFocusedDepthRef.current;
+      const isPhantomMutationFocus =
+        e.relatedTarget === null && focusedIndex !== null;
+      if (isSameLogicalRow || isPhantomMutationFocus) {
+        return;
+      }
+      // console.log("FlashList focusEvent");
+      lastFocusedIndexRef.current = focusedIndex;
+      lastFocusedDepthRef.current = focusedDepth;
+      lastFocusTimeRef.current = Date.now();
+      maybeDoSortOnFocus();
+    };
+    container.addEventListener("focusin", onFocusIn);
+    return () => container.removeEventListener("focusin", onFocusIn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") {
+      return;
+    }
+
+    maybeDoSortOnScroll();
+    return clearPendingSort;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderStack, renderId]);
+
   return (
-    <CompatView style={hasData && containerStyle}>
+    <CompatView ref={containerRef} style={hasData && containerStyle}>
       {containerLayout &&
         hasData &&
-        Array.from(renderStack.entries(), ([reactKey, { index }]) => {
+        renderEntriesRef.current.map(([reactKey, { index }]) => {
           const item = data[index];
           // Suppress separators for items in the last row to prevent
           // height mismatch. The last data item has no separator (no

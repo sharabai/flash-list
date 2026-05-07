@@ -4,7 +4,7 @@
  * The component is memoized to prevent unnecessary re-renders and includes layout comparison logic.
  */
 
-import { LayoutChangeEvent } from "react-native";
+import { LayoutChangeEvent, Platform } from "react-native";
 import React, {
   RefObject,
   useCallback,
@@ -18,6 +18,8 @@ import { FlashListProps, RenderTarget } from "../FlashListProps";
 import { RVDimension, RVLayout } from "./layout-managers/LayoutManager";
 import { CompatView } from "./components/CompatView";
 import { getInvertedTransformStyle } from "./utils/getInvertedTransformStyle";
+
+const INVISIBLE_MARKER_STYLE = { display: "none" } as const;
 
 /**
  * Props interface for the ViewHolder component
@@ -140,6 +142,13 @@ const ViewHolderInternal = <TItem,>(props: ViewHolderProps<TItem>) => {
       index={index}
     >
       {children}
+      {Platform.OS === "web" && (
+        <div
+          data-flashlist-index={index}
+          aria-hidden
+          style={INVISIBLE_MARKER_STYLE}
+        />
+      )}
       {separator}
     </CompatContainer>
   );

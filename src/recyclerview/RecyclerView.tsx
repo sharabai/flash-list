@@ -60,7 +60,7 @@ import { RenderTimeTracker } from "./helpers/RenderTimeTracker";
  */
 const RecyclerViewComponent = <T,>(
   props: RecyclerViewProps<T>,
-  ref: React.Ref<FlashListRef<T>>
+  ref: React.Ref<FlashListRef<T>>,
 ) => {
   // Destructure props and initialize refs
   const {
@@ -129,7 +129,7 @@ const RecyclerViewComponent = <T,>(
   // Map to store refs for each item in the list
   const refHolder = useMemo(
     () => new Map<number, RefObject<CompatView | null>>(),
-    []
+    [],
   );
 
   // Initialize core RecyclerView manager and content offset management
@@ -140,11 +140,18 @@ const RecyclerViewComponent = <T,>(
     computeFirstVisibleIndexForOffsetCorrection,
     applyInitialScrollIndex,
     handlerMethods,
+    isScrollingProgrammatically,
+    isScrolling,
+    runAfterProgrammaticScroll,
+    notifyProgrammaticScrollSettled,
+    notifyScrollActive,
+    notifyScrollSettled,
+    getLastScrollTime,
   } = useRecyclerViewController(
     recyclerViewManager,
     ref,
     scrollViewRef,
-    scrollAnchorRef
+    scrollAnchorRef,
   );
 
   // Initialize view holder collection ref
@@ -168,7 +175,7 @@ const RecyclerViewComponent = <T,>(
       const outerViewSize = measureParentSize(internalViewRef.current);
       const firstChildViewLayout = measureFirstChildLayout(
         firstChildViewRef.current,
-        internalViewRef.current
+        internalViewRef.current,
       );
 
       containerViewSizeRef.current = outerViewSize;
@@ -190,7 +197,7 @@ const RecyclerViewComponent = <T,>(
         isHorizontalRTL && recyclerViewManager.hasLayout()
           ? firstItemOffset -
               recyclerViewManager.getChildContainerDimensions().width
-          : firstItemOffset
+          : firstItemOffset,
       );
     }
   });
@@ -207,7 +214,7 @@ const RecyclerViewComponent = <T,>(
     const layoutInfo = Array.from(refHolder, ([index, viewHolderRef]) => {
       const layout = measureItemLayout(
         viewHolderRef.current!,
-        recyclerViewManager.tryGetLayout(index)
+        recyclerViewManager.tryGetLayout(index),
       );
 
       // comapre height with stored layout
@@ -274,7 +281,7 @@ const RecyclerViewComponent = <T,>(
         scrollOffset = adjustOffsetForRTL(
           scrollOffset,
           event.nativeEvent.contentSize.width,
-          event.nativeEvent.layoutMeasurement.width
+          event.nativeEvent.layoutMeasurement.width,
         );
       }
 
@@ -288,17 +295,24 @@ const RecyclerViewComponent = <T,>(
           }
 
           if (isMomentumEnd) {
+            notifyScrollSettled();
+            // Drain BEFORE the early return below so the drain still
+            // fires while offset projection is still disabled.
+            notifyProgrammaticScrollSettled();
+
             computeFirstVisibleIndexForOffsetCorrection();
             if (!recyclerViewManager.isOffsetProjectionEnabled) {
               return;
             }
             recyclerViewManager.resetVelocityCompute();
+          } else {
+            notifyScrollActive();
           }
           // Update scroll position and trigger re-render if needed
           if (recyclerViewManager.updateScrollOffset(scrollOffset, velocity)) {
             setRenderId((prev) => prev + 1);
           }
-        }
+        },
       );
 
       // Update sticky headers and check bounds
@@ -321,9 +335,12 @@ const RecyclerViewComponent = <T,>(
       computeFirstVisibleIndexForOffsetCorrection,
       horizontal,
       isHorizontalRTL,
+      notifyProgrammaticScrollSettled,
+      notifyScrollActive,
+      notifyScrollSettled,
       recyclerViewManager,
       velocityTracker,
-    ]
+    ],
   );
 
   const parentRecyclerViewContext = useRecyclerViewContext();
@@ -376,11 +393,11 @@ const RecyclerViewComponent = <T,>(
       const layout = recyclerViewManager.getLayout(index);
       const width = Math.max(
         Math.min(layout.width, layout.maxWidth ?? Infinity),
-        layout.minWidth ?? 0
+        layout.minWidth ?? 0,
       );
       const height = Math.max(
         Math.min(layout.height, layout.maxHeight ?? Infinity),
-        layout.minHeight ?? 0
+        layout.minHeight ?? 0,
       );
       if (
         areDimensionsNotEqual(width, size.width) ||
@@ -398,7 +415,7 @@ const RecyclerViewComponent = <T,>(
         recyclerViewContext.layout();
       }
     },
-    [recyclerViewContext, recyclerViewManager]
+    [recyclerViewContext, recyclerViewManager],
   );
 
   // Get secondary props and components
@@ -474,7 +491,7 @@ const RecyclerViewComponent = <T,>(
         {
           useNativeDriver: stickyHeaderUseNativeDriver,
           listener: onScrollHandler,
-        }
+        },
       );
     }
     return onScrollHandler;
@@ -543,11 +560,11 @@ const RecyclerViewComponent = <T,>(
           if (
             areDimensionsNotEqual(
               event.nativeEvent.layout.width,
-              containerViewSizeRef.current?.width ?? 0
+              containerViewSizeRef.current?.width ?? 0,
             ) ||
             areDimensionsNotEqual(
               event.nativeEvent.layout.height,
-              containerViewSizeRef.current?.height ?? 0
+              containerViewSizeRef.current?.height ?? 0,
             )
           ) {
             // console.log(
@@ -599,7 +616,7 @@ const RecyclerViewComponent = <T,>(
                 0,
                 windowSize -
                   childContainerSize -
-                  recyclerViewManager.firstItemOffset
+                  recyclerViewManager.firstItemOffset,
               );
             }}
             refHolder={refHolder}
@@ -609,14 +626,14 @@ const RecyclerViewComponent = <T,>(
             onCommitLayoutEffect={() => {
               applyInitialScrollIndex();
               parentRecyclerViewContext?.unmarkChildLayoutAsPending(
-                recyclerViewId
+                recyclerViewId,
               );
               onCommitLayoutEffect?.();
             }}
             onCommitEffect={() => {
               renderTimeTracker.markRenderComplete();
               recyclerViewManager.updateAverageRenderTime(
-                renderTimeTracker.getAverageRenderTime()
+                renderTimeTracker.getAverageRenderTime(),
               );
               applyInitialScrollIndex();
               checkBounds();
@@ -634,6 +651,10 @@ const RecyclerViewComponent = <T,>(
             currentStickyIndex={currentStickyIndex}
             hideStickyHeaderRelatedCell={stickyHeaderHideRelatedCell}
             inverted={inverted}
+            isScrollingProgrammatically={isScrollingProgrammatically}
+            isScrolling={isScrolling}
+            runAfterProgrammaticScroll={runAfterProgrammaticScroll}
+            getLastScrollTime={getLastScrollTime}
           />
           {renderEmpty}
           {renderFooter}
@@ -652,12 +673,12 @@ RecyclerViewComponent.displayName = "FlashList";
 
 // Type definition for the RecyclerView component
 type RecyclerViewType = <T>(
-  props: RecyclerViewProps<T> & { ref?: React.Ref<FlashListRef<T>> }
+  props: RecyclerViewProps<T> & { ref?: React.Ref<FlashListRef<T>> },
 ) => React.JSX.Element;
 
 // Create and export the memoized, forwarded ref component
 const RecyclerView = React.memo(
-  forwardRef(RecyclerViewComponent)
+  forwardRef(RecyclerViewComponent),
 ) as RecyclerViewType;
 
 export { RecyclerView };

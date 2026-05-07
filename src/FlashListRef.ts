@@ -182,6 +182,31 @@ export interface FlashListRef<T> {
   scrollToIndex: (params: ScrollToIndexParams) => Promise<void>;
 
   /**
+   * Announces an imminent programmatic scroll before `scrollToIndex` is
+   * actually called, so DOM-mutating side-effects gated on
+   * `isScrollingProgrammatically()` (notably the on-web sort applied by
+   * `ViewHolderCollection`) defer until the upcoming smooth scroll
+   * settles, rather than running synchronously and cancelling it.
+   *
+   * Useful when the focus assignment happens first and `scrollToIndex`
+   * follows a few ticks later — as long as the call is guaranteed to
+   * happen, queue it up front so the intervening `focusin` doesn't
+   * trigger an immediate sort that the smooth scroll would then cancel.
+   *
+   * Cleared automatically when the next `scrollToIndex` is invoked
+   * (handed off to the in-flight flag) and again when the resulting
+   * scroll's momentum ends. Safe to call multiple times.
+   *
+   * @example
+   * listRef.current?.queueProgrammaticScroll();
+   * itemDomNode.focus();
+   * setTimeout(() => {
+   *   listRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+   * }, 0);
+   */
+  queueProgrammaticScroll: () => void;
+
+  /**
    * Scrolls to a specific item in the list.
    *
    * Similar to scrollToIndex, but works with the item reference instead of its index.
