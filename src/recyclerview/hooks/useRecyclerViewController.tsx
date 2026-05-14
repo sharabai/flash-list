@@ -55,7 +55,7 @@ export function useRecyclerViewController<T>(
   // flight. Cleared exactly once on `isMomentumEnd` via
   // `notifyProgrammaticScrollSettled`.
   const isProgrammaticScrollActiveRef = useRef(false);
-  // Set by `queueProgrammaticScroll()` to announce an imminent scroll.
+  // Set by `announceProgrammaticScroll()` to announce an imminent scroll.
   // Handed off to `isProgrammaticScrollActiveRef` at `scrollToIndex` entry.
   const isProgrammaticScrollQueuedRef = useRef(false);
   // Source-agnostic "viewport in motion" flag.
@@ -250,8 +250,8 @@ export function useRecyclerViewController<T>(
     pendingAfterScrollRef.current = cb;
   }, []);
 
-  // Public API; see `FlashListRef#queueProgrammaticScroll`.
-  const queueProgrammaticScroll = useCallback(() => {
+  // Public API; see `FlashListRef#announceProgrammaticScroll`.
+  const announceProgrammaticScroll = useCallback(() => {
     isProgrammaticScrollQueuedRef.current = true;
   }, []);
 
@@ -368,9 +368,9 @@ export function useRecyclerViewController<T>(
 
       /**
        * Announces an imminent programmatic scroll. See
-       * `FlashListRef#queueProgrammaticScroll` for full semantics.
+       * `FlashListRef#announceProgrammaticScroll` for full semantics.
        */
-      queueProgrammaticScroll,
+      announceProgrammaticScroll,
 
       /**
        * Scrolls to a specific index in the list.
@@ -635,7 +635,7 @@ export function useRecyclerViewController<T>(
     setTimeout,
     isUnmounted,
     updateScrollOffsetWithCallback,
-    queueProgrammaticScroll,
+    announceProgrammaticScroll,
   ]);
 
   const applyInitialScrollIndex = useCallback(() => {

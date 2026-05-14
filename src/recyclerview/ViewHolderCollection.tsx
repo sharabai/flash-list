@@ -274,7 +274,7 @@ export const ViewHolderCollection = <TItem,>(
   const renderEntriesRef = useRef(Array.from(renderStack.entries()));
   const [, bumpSortVersion] = useReducer((x: number) => x + 1, 0);
 
-  const doSort = useCallback(() => {
+  const sortItems = useCallback(() => {
     const entries = renderEntriesRef.current;
     const direction = inverted ? -1 : 1;
     const isSorted = entries.every(
@@ -286,11 +286,10 @@ export const ViewHolderCollection = <TItem,>(
     }
     entries.sort(([, a], [, b]) => direction * (a.index - b.index));
     bumpSortVersion();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inverted]);
 
   const [schedulePendingSort, clearPendingSort] = useDeferredCallback(
-    doSort,
+    sortItems,
     SORT_DELAY_MS,
     isScrolling,
   );
@@ -303,17 +302,15 @@ export const ViewHolderCollection = <TItem,>(
     }
     if (shouldSortOnNextFocusRef.current) {
       shouldSortOnNextFocusRef.current = false;
-      doSort();
+      sortItems();
     }
     schedulePendingSort();
   }, [
     isScrollingProgrammatically,
-    isScrolling,
     runAfterProgrammaticScroll,
     schedulePendingSort,
     clearPendingSort,
-    doSort,
-    getLastScrollTime,
+    sortItems,
   ]);
   const maybeDoSortOnScroll = useCallback(() => {
     shouldSortOnNextFocusRef.current = true;
@@ -334,7 +331,7 @@ export const ViewHolderCollection = <TItem,>(
         scrollSinceFocus >= 0 &&
         scrollSinceFocus < FOCUS_INDUCED_SCROLL_WINDOW_MS;
       if (scrollNow) {
-        doSort();
+        sortItems();
         shouldSortOnNextFocusRef.current = false;
         return;
       }
@@ -346,7 +343,7 @@ export const ViewHolderCollection = <TItem,>(
     runAfterProgrammaticScroll,
     schedulePendingSort,
     clearPendingSort,
-    doSort,
+    sortItems,
     getLastScrollTime,
   ]);
 
@@ -395,8 +392,7 @@ export const ViewHolderCollection = <TItem,>(
     };
     container.addEventListener("focusin", onFocusIn);
     return () => container.removeEventListener("focusin", onFocusIn);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [maybeDoSortOnFocus]);
 
   useEffect(() => {
     if (Platform.OS !== "web") {

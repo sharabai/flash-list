@@ -198,13 +198,13 @@ export interface FlashListRef<T> {
    * scroll's momentum ends. Safe to call multiple times.
    *
    * @example
-   * listRef.current?.queueProgrammaticScroll();
+   * listRef.current?.announceProgrammaticScroll();
    * itemDomNode.focus();
    * setTimeout(() => {
    *   listRef.current?.scrollToIndex({ index: nextIndex, animated: true });
    * }, 0);
    */
-  queueProgrammaticScroll: () => void;
+  announceProgrammaticScroll: () => void;
 
   /**
    * Scrolls to a specific item in the list.
