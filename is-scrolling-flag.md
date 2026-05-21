@@ -13,13 +13,13 @@ The flag is backed by a single `isScrollingRef` and toggled by two single-purpos
 
 ## 2. Why it exists — the gap in existing scroll-state signals
 
-| Signal | Where | What it means | Why it doesn't fit "is anything scrolling?" |
-| --- | --- | --- | --- |
-| `isProgrammaticScrollActiveRef` | [useRecyclerViewController.tsx:61](src/recyclerview/hooks/useRecyclerViewController.tsx) | Set on `scrollToIndex` / `scrollToOffset` entry, cleared by `notifyProgrammaticScrollSettled` on momentum-end. | Programmatic-only. Misses user-driven scrolls. |
-| `isProgrammaticScrollQueuedRef` | [useRecyclerViewController.tsx:69](src/recyclerview/hooks/useRecyclerViewController.tsx) | Set by the public `queueProgrammaticScroll()` API. Pre-scroll intent. | Programmatic-only. |
-| `isScrollingProgrammatically()` | [useRecyclerViewController.tsx:244-249](src/recyclerview/hooks/useRecyclerViewController.tsx) | OR of the above two. | Misses user-driven scrolls. |
-| `pauseOffsetCorrection` | [useRecyclerViewController.tsx:53](src/recyclerview/hooks/useRecyclerViewController.tsx) | Pauses MVCP offset corrections during chunked `scrollToIndex` steps. | Flickers under chunked scrolls; cleared by fixed 100 / 200 / 300 ms timers, not by the actual scroll-completion signal. Not usable. |
-| `ignoreScrollEvents` | [RecyclerViewManager.ts:40](src/recyclerview/RecyclerViewManager.ts) | Internal 100 ms blackout for MVCP synthetic scrolls. | Internal-only; narrow; doesn't answer the general question. |
+| Signal                          | Where                                                                                         | What it means                                                                                                  | Why it doesn't fit "is anything scrolling?"                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `isProgrammaticScrollActiveRef` | [useRecyclerViewController.tsx:61](src/recyclerview/hooks/useRecyclerViewController.tsx)      | Set on `scrollToIndex` / `scrollToOffset` entry, cleared by `notifyProgrammaticScrollSettled` on momentum-end. | Programmatic-only. Misses user-driven scrolls.                                                                                      |
+| `isProgrammaticScrollQueuedRef` | [useRecyclerViewController.tsx:69](src/recyclerview/hooks/useRecyclerViewController.tsx)      | Set by the public `queueProgrammaticScroll()` API. Pre-scroll intent.                                          | Programmatic-only.                                                                                                                  |
+| `isScrollingProgrammatically()` | [useRecyclerViewController.tsx:244-249](src/recyclerview/hooks/useRecyclerViewController.tsx) | OR of the above two.                                                                                           | Misses user-driven scrolls.                                                                                                         |
+| `pauseOffsetCorrection`         | [useRecyclerViewController.tsx:53](src/recyclerview/hooks/useRecyclerViewController.tsx)      | Pauses MVCP offset corrections during chunked `scrollToIndex` steps.                                           | Flickers under chunked scrolls; cleared by fixed 100 / 200 / 300 ms timers, not by the actual scroll-completion signal. Not usable. |
+| `ignoreScrollEvents`            | [RecyclerViewManager.ts:40](src/recyclerview/RecyclerViewManager.ts)                          | Internal 100 ms blackout for MVCP synthetic scrolls.                                                           | Internal-only; narrow; doesn't answer the general question.                                                                         |
 
 None of these answer the question **"is any scroll, from any source, in progress right now?"**. `isScrolling()` does.
 
@@ -73,11 +73,11 @@ These exist by design and are documented so consumers know when to compose with 
 
 ## 7. Composition with existing flags
 
-| Question | Use this |
-| --- | --- |
-| "Is a programmatic scroll queued or in flight?" | `isScrollingProgrammatically()` |
-| "Is the viewport in motion (any source) right now?" | `isScrolling()` |
-| "Is any scroll either pre-imminent or in motion?" | `isScrollingProgrammatically() \|\| isScrolling()` |
+| Question                                            | Use this                                           |
+| --------------------------------------------------- | -------------------------------------------------- |
+| "Is a programmatic scroll queued or in flight?"     | `isScrollingProgrammatically()`                    |
+| "Is the viewport in motion (any source) right now?" | `isScrolling()`                                    |
+| "Is any scroll either pre-imminent or in motion?"   | `isScrollingProgrammatically() \|\| isScrolling()` |
 
 ## 8. Why this is sound for sort-gating — latency reasoning
 

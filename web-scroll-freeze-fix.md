@@ -62,11 +62,11 @@ That's it. No new public API. No change to `FlashListContext`. No new DOM listen
 
 **Behaviors that do _not_ reproduce the bug:**
 
-| Scenario | Why it doesn't freeze |
-| --- | --- |
-| Arrow keys with focus in a search input outside the list | Focused element is the input, not a list descendant. React's `restoreSelection` saves/restores `scrollTop` of the input's scrollable ancestors, not ours. |
-| Tab key navigation through rows | Tab doesn't go through `scrollToIndex`. Browser's native `scrollIntoView` is synchronous (instant), so there's no in-flight smooth scroll to cancel. |
-| Early arrow presses at the top of the list | `renderEntriesRef` is still already-sorted (no recycling has shuffled the array order yet). `doSort` short-circuits at `isSorted` → no `setSortId` → no commit → no `restoreSelection`. |
+| Scenario                                                 | Why it doesn't freeze                                                                                                                                                                   |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Arrow keys with focus in a search input outside the list | Focused element is the input, not a list descendant. React's `restoreSelection` saves/restores `scrollTop` of the input's scrollable ancestors, not ours.                               |
+| Tab key navigation through rows                          | Tab doesn't go through `scrollToIndex`. Browser's native `scrollIntoView` is synchronous (instant), so there's no in-flight smooth scroll to cancel.                                    |
+| Early arrow presses at the top of the list               | `renderEntriesRef` is still already-sorted (no recycling has shuffled the array order yet). `doSort` short-circuits at `isSorted` → no `setSortId` → no commit → no `restoreSelection`. |
 
 ## 2. The setup — what patch-007 does and why
 
@@ -195,11 +195,11 @@ It is a heuristic for **FlashList's own self-quiescing internal consumers** — 
 
 A non-self-quiescing consumer like our deferred `doSort` cannot be hitched to that timer. Once we register a callback, somebody must invoke it; if the timer fires mid-animation, our drain commits `insertBefore` mid-animation, and the kill chain in §3 cancels the scroll.
 
-| Consumer | What happens if the flag clears too early? |
-| --- | --- |
+| Consumer                                                   | What happens if the flag clears too early?                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `applyOffsetCorrection` (gated by `pauseOffsetCorrection`) | A structural property of the per-call timer is that the flag flips back independently of whether a newer programmatic scroll is still in flight. In practice this is masked: the inner branch also requires `diff !== 0` (data must have changed), and during pure-offset programmatic scrolls `diff === 0` short-circuits it to a no-op. |
-| `setOffsetProjectionEnabled` (velocity-based projection) | Engaged-window decisions get biased by ~1–2 frames. Recovers within 1–2 frames. |
-| **Our deferred `doSort` drain** | **Immediately cancels the in-flight smooth scroll. Visible freeze.** |
+| `setOffsetProjectionEnabled` (velocity-based projection)   | Engaged-window decisions get biased by ~1–2 frames. Recovers within 1–2 frames.                                                                                                                                                                                                                                                           |
+| **Our deferred `doSort` drain**                            | **Immediately cancels the in-flight smooth scroll. Visible freeze.**                                                                                                                                                                                                                                                                      |
 
 Conclusion: the timer is a reasonable heuristic for what FlashList already uses it for; we just can't repurpose it.
 
@@ -430,16 +430,16 @@ The deferred `setTimeout(SORT_DELAY_MS = 1000)` branch is left calling `doSort()
 
 ## 8. Behavior matrix — before vs. after
 
-| Scenario | Before fix | After fix |
-| --- | --- | --- |
-| Single arrow press, focused row, neighbor item | Smooth (item is in view; no `scrollToIndex`) | Smooth (unchanged) |
-| Single arrow press, focused row, scrollToIndex required | Freezes part-way once recycling kicks in | Smooth — drain runs after `isMomentumEnd` |
-| Long-distance `scrollToIndex` (first → last) | Severe freeze (timer fires mid-animation) | Smooth — drain waits for actual scroll-end |
-| Held arrow key (key-repeat ~30 ms) | Severe freeze, near-zero progress | Smooth (`isProgrammaticScrollActive` stays true across overlapping presses; one drain at the merged end) |
-| Arrow keys with focus in search input | Smooth | Smooth (unchanged — input is not in the list) |
-| Tab key navigation | Smooth | Smooth (unchanged — `isProgrammaticScrollActive` is false during Tab) |
-| Screen reader reading order | Correct (patch-007 sort still applies after the scroll) | Correct (unchanged) |
-| Cross-item text selection | Correct (sort still applies after the scroll) | Correct (unchanged) |
+| Scenario                                                | Before fix                                              | After fix                                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Single arrow press, focused row, neighbor item          | Smooth (item is in view; no `scrollToIndex`)            | Smooth (unchanged)                                                                                       |
+| Single arrow press, focused row, scrollToIndex required | Freezes part-way once recycling kicks in                | Smooth — drain runs after `isMomentumEnd`                                                                |
+| Long-distance `scrollToIndex` (first → last)            | Severe freeze (timer fires mid-animation)               | Smooth — drain waits for actual scroll-end                                                               |
+| Held arrow key (key-repeat ~30 ms)                      | Severe freeze, near-zero progress                       | Smooth (`isProgrammaticScrollActive` stays true across overlapping presses; one drain at the merged end) |
+| Arrow keys with focus in search input                   | Smooth                                                  | Smooth (unchanged — input is not in the list)                                                            |
+| Tab key navigation                                      | Smooth                                                  | Smooth (unchanged — `isProgrammaticScrollActive` is false during Tab)                                    |
+| Screen reader reading order                             | Correct (patch-007 sort still applies after the scroll) | Correct (unchanged)                                                                                      |
+| Cross-item text selection                               | Correct (sort still applies after the scroll)           | Correct (unchanged)                                                                                      |
 
 ## 9. Verification
 
@@ -461,11 +461,11 @@ The deferred `setTimeout(SORT_DELAY_MS = 1000)` branch is left calling `doSort()
 
 ## 10. Files changed
 
-| File | Change |
-| --- | --- |
-| `src/recyclerview/hooks/useRecyclerViewController.tsx` | Added `isProgrammaticScrollActive` and `pendingAfterScrollRef`; implemented `isScrollingProgrammatically`, `runAfterProgrammaticScroll`, and `notifyProgrammaticScrollSettled`; flipped `isProgrammaticScrollActive.current = true` at `scrollToIndex` entry. |
-| `src/recyclerview/RecyclerView.tsx` | Destructured the three new methods from the controller; invoked `notifyProgrammaticScrollSettled` inside the existing `isMomentumEnd` branch (before the early return); forwarded `isScrollingProgrammatically` and `runAfterProgrammaticScroll` to `<ViewHolderCollection />` as props. |
-| `src/recyclerview/ViewHolderCollection.tsx` | Added the two methods to `ViewHolderCollectionProps`; destructured them from props; added the `maybeDoSort` wrapper; routed the `focusin` listener and the immediate branch of the sort effect through it. |
+| File                                                   | Change                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/recyclerview/hooks/useRecyclerViewController.tsx` | Added `isProgrammaticScrollActive` and `pendingAfterScrollRef`; implemented `isScrollingProgrammatically`, `runAfterProgrammaticScroll`, and `notifyProgrammaticScrollSettled`; flipped `isProgrammaticScrollActive.current = true` at `scrollToIndex` entry.                            |
+| `src/recyclerview/RecyclerView.tsx`                    | Destructured the three new methods from the controller; invoked `notifyProgrammaticScrollSettled` inside the existing `isMomentumEnd` branch (before the early return); forwarded `isScrollingProgrammatically` and `runAfterProgrammaticScroll` to `<ViewHolderCollection />` as props. |
+| `src/recyclerview/ViewHolderCollection.tsx`            | Added the two methods to `ViewHolderCollectionProps`; destructured them from props; added the `maybeDoSort` wrapper; routed the `focusin` listener and the immediate branch of the sort effect through it.                                                                               |
 
 `src/recyclerview/RecyclerViewContextProvider.ts` and `src/recyclerview/LayoutCommitObserver.tsx` are untouched — the public `FlashListContext` interface is unchanged from upstream, and the LCO context-forwarding logic is unchanged.
 
@@ -473,38 +473,38 @@ No new public API. No new files. No new dependencies. No new DOM event listeners
 
 ## 11. Alternatives considered (and rejected)
 
-| Alternative | Why rejected |
-| --- | --- |
-| Consumer-side: pass `animated: false` to `scrollToIndex` | Eliminates the freeze but replaces smooth scroll with an abrupt jump. UX regression, not a library fix. |
-| Remove patch 007 | Regresses screen-reader / Tab / cross-item selection. |
-| Drain inside the existing 200/300 ms `setTimeout` | What earlier attempts tried. The timer is a heuristic, not a scroll-end signal — it fires mid-animation for long scrolls (see §4). |
-| Install our own per-press `scrollend` listener | Works on Chromium / Firefox but duplicates `VelocityTracker` infrastructure FlashList already maintains, requires per-press setup/teardown, lacks a native fallback, and would need press-id arithmetic for overlap handling that `isMomentumEnd` already gives us for free. |
-| Replace `element.scroll({behavior:'smooth'})` with a manual rAF animation | Large change; still cancellable by `restoreSelection`. |
-| Detach focused row from the scroll container (portal) | Breaks Tab / hover / hit-testing. |
-| Gate on `isRecentFocus` differently | Doesn't address the mechanism — the kill chain is triggered by the sort effect's commit, not by `focusin` itself. |
-| Promote `pauseOffsetCorrection` to React state | Re-renders on every programmatic scroll. |
-| Fix `pauseOffsetCorrection`'s lifecycle directly here | Conflates two independent concerns; would change downstream behaviors out of scope for this fix. |
-| `MutationObserver`-based `scrollTop` rollback | Fights React's intended `restoreSelection` behavior; flaky. |
+| Alternative                                                               | Why rejected                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Consumer-side: pass `animated: false` to `scrollToIndex`                  | Eliminates the freeze but replaces smooth scroll with an abrupt jump. UX regression, not a library fix.                                                                                                                                                                      |
+| Remove patch 007                                                          | Regresses screen-reader / Tab / cross-item selection.                                                                                                                                                                                                                        |
+| Drain inside the existing 200/300 ms `setTimeout`                         | What earlier attempts tried. The timer is a heuristic, not a scroll-end signal — it fires mid-animation for long scrolls (see §4).                                                                                                                                           |
+| Install our own per-press `scrollend` listener                            | Works on Chromium / Firefox but duplicates `VelocityTracker` infrastructure FlashList already maintains, requires per-press setup/teardown, lacks a native fallback, and would need press-id arithmetic for overlap handling that `isMomentumEnd` already gives us for free. |
+| Replace `element.scroll({behavior:'smooth'})` with a manual rAF animation | Large change; still cancellable by `restoreSelection`.                                                                                                                                                                                                                       |
+| Detach focused row from the scroll container (portal)                     | Breaks Tab / hover / hit-testing.                                                                                                                                                                                                                                            |
+| Gate on `isRecentFocus` differently                                       | Doesn't address the mechanism — the kill chain is triggered by the sort effect's commit, not by `focusin` itself.                                                                                                                                                            |
+| Promote `pauseOffsetCorrection` to React state                            | Re-renders on every programmatic scroll.                                                                                                                                                                                                                                     |
+| Fix `pauseOffsetCorrection`'s lifecycle directly here                     | Conflates two independent concerns; would change downstream behaviors out of scope for this fix.                                                                                                                                                                             |
+| `MutationObserver`-based `scrollTop` rollback                             | Fights React's intended `restoreSelection` behavior; flaky.                                                                                                                                                                                                                  |
 
 ## 12. Glossary
 
-| Term | Meaning |
-| --- | --- |
-| **Patch 007** | `@shopify+flash-list+2.3.0+007+sort-for-natural-DOM-order.patch`. Sorts `renderEntriesRef` so DOM order matches visual order on web. Adds the deferred (1 s) sort and the focusin-driven fast-track sort. |
-| **`renderEntriesRef`** | Ref in `ViewHolderCollection` holding the stable render order across renders. Reconciliation appends new keys and removes departed ones; `doSort` reorders by `index`. |
-| **`doSort`** | Sorts `renderEntriesRef` in place by data index, then calls `setSortId(prev => prev + 1)` to schedule a React commit whose only purpose is reordering DOM children via `insertBefore`. |
-| **`maybeDoSort`** | New wrapper introduced by this fix. Defers `doSort` via `runAfterProgrammaticScroll` if `isScrollingProgrammatically()` is true; otherwise calls `doSort` immediately. |
-| **`pauseOffsetCorrection`** | Pre-existing controller ref that gates `applyOffsetCorrection`. Cleared by the 200/300 ms `setTimeout` inside `finishScrollToIndex`. **Not touched by this fix.** |
-| **`isProgrammaticScrollActive`** | New controller ref introduced by this fix. Tracks "is a programmatic scroll in flight?" with strict semantics: set at `scrollToIndex` entry, cleared exactly once when `isMomentumEnd` fires. |
-| **`isMomentumEnd`** | Signal computed by `helpers/VelocityTracker.ts` `computeVelocity`. `true` exactly once when no `scroll` events have fired for 100 ms — i.e. when the merged smooth scroll has truly settled. |
-| **`restoreSelection`** | React-DOM internal that re-focuses the saved active element and writes back saved `scrollTop`/`scrollLeft` of its scrollable ancestors. Runs in the commit phase after mutations are applied. |
-| **CSSOM `scroll` cancellation** | Per [CSSOM-View §7.3](https://www.w3.org/TR/cssom-view-1/#dom-element-scrolltop), writing `element.scrollTop = N` performs an instant scroll, which aborts any in-flight `behavior: 'smooth'` animation on that element. |
+| Term                             | Meaning                                                                                                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Patch 007**                    | `@shopify+flash-list+2.3.0+007+sort-for-natural-DOM-order.patch`. Sorts `renderEntriesRef` so DOM order matches visual order on web. Adds the deferred (1 s) sort and the focusin-driven fast-track sort.                |
+| **`renderEntriesRef`**           | Ref in `ViewHolderCollection` holding the stable render order across renders. Reconciliation appends new keys and removes departed ones; `doSort` reorders by `index`.                                                   |
+| **`doSort`**                     | Sorts `renderEntriesRef` in place by data index, then calls `setSortId(prev => prev + 1)` to schedule a React commit whose only purpose is reordering DOM children via `insertBefore`.                                   |
+| **`maybeDoSort`**                | New wrapper introduced by this fix. Defers `doSort` via `runAfterProgrammaticScroll` if `isScrollingProgrammatically()` is true; otherwise calls `doSort` immediately.                                                   |
+| **`pauseOffsetCorrection`**      | Pre-existing controller ref that gates `applyOffsetCorrection`. Cleared by the 200/300 ms `setTimeout` inside `finishScrollToIndex`. **Not touched by this fix.**                                                        |
+| **`isProgrammaticScrollActive`** | New controller ref introduced by this fix. Tracks "is a programmatic scroll in flight?" with strict semantics: set at `scrollToIndex` entry, cleared exactly once when `isMomentumEnd` fires.                            |
+| **`isMomentumEnd`**              | Signal computed by `helpers/VelocityTracker.ts` `computeVelocity`. `true` exactly once when no `scroll` events have fired for 100 ms — i.e. when the merged smooth scroll has truly settled.                             |
+| **`restoreSelection`**           | React-DOM internal that re-focuses the saved active element and writes back saved `scrollTop`/`scrollLeft` of its scrollable ancestors. Runs in the commit phase after mutations are applied.                            |
+| **CSSOM `scroll` cancellation**  | Per [CSSOM-View §7.3](https://www.w3.org/TR/cssom-view-1/#dom-element-scrolltop), writing `element.scrollTop = N` performs an instant scroll, which aborts any in-flight `behavior: 'smooth'` animation on that element. |
 
 ## 13. Constants involved
 
-| Constant | Value | Defined in | Purpose |
-| --- | --- | --- | --- |
-| `SORT_DELAY_MS` | 1000 | `ViewHolderCollection.tsx` | Deferred-sort debounce after scrolling pauses. |
-| `TAB_SCROLL_THRESHOLD_MS` | 400 | `ViewHolderCollection.tsx` | "Recent focus" window — within this many ms of the last `focusin`, the sort effect takes the immediate branch (fast-track). |
+| Constant                           | Value     | Defined in                                              | Purpose                                                                                                                           |
+| ---------------------------------- | --------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `SORT_DELAY_MS`                    | 1000      | `ViewHolderCollection.tsx`                              | Deferred-sort debounce after scrolling pauses.                                                                                    |
+| `TAB_SCROLL_THRESHOLD_MS`          | 400       | `ViewHolderCollection.tsx`                              | "Recent focus" window — within this many ms of the last `focusin`, the sort effect takes the immediate branch (fast-track).       |
 | `setTimeout(animated ? 300 : 200)` | 200 / 300 | `useRecyclerViewController.tsx` (`finishScrollToIndex`) | Pre-existing heuristic timer that flips `pauseOffsetCorrection` and `setOffsetProjectionEnabled` back. **Untouched by this fix.** |
-| `VelocityTracker` debounce | 100 | `helpers/VelocityTracker.ts` | How long after the last `scroll` event before `isMomentumEnd: true` fires. |
+| `VelocityTracker` debounce         | 100       | `helpers/VelocityTracker.ts`                            | How long after the last `scroll` event before `isMomentumEnd: true` fires.                                                        |

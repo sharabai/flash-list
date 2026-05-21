@@ -42,7 +42,7 @@ React commits in two relevant phases:
 1. **Mutation phase** — DOM attributes/insertions are applied (`flushMutationEffects`).
 2. **Layout phase** — `useLayoutEffect`s run, child-first, then parents.
 
-The consumer's `useSyncFocus` is a `useLayoutEffect` running on a leaf component **inside** `{children}`. ViewHolder's effect that writes `refHolder.set(index, ref)` is on an ancestor. By React's child-first rule, the consumer's effect fires first. When it calls `ref.current?.focus()`, `focusin` is dispatched **synchronously** (DOM spec — programmatic `.focus()` does not queue), so the listener runs *before* ViewHolder's `useLayoutEffect` has had a chance to update `refHolder` for this commit.
+The consumer's `useSyncFocus` is a `useLayoutEffect` running on a leaf component **inside** `{children}`. ViewHolder's effect that writes `refHolder.set(index, ref)` is on an ancestor. By React's child-first rule, the consumer's effect fires first. When it calls `ref.current?.focus()`, `focusin` is dispatched **synchronously** (DOM spec — programmatic `.focus()` does not queue), so the listener runs _before_ ViewHolder's `useLayoutEffect` has had a chance to update `refHolder` for this commit.
 
 Result on a recycle commit:
 
@@ -74,7 +74,7 @@ The race produced two distinct symptoms in our repro logs (300+ events captured 
 
 ## 2. Why a DOM attribute is race-free
 
-`data-flashlist-index={index}` is plain JSX. React applies it during the **mutation phase**, which finishes *before any* layout effect runs. From that moment on:
+`data-flashlist-index={index}` is plain JSX. React applies it during the **mutation phase**, which finishes _before any_ layout effect runs. From that moment on:
 
 - The marker for every visible row reflects the row's current data index.
 - Reading `dataset.flashlistIndex` from any descendant of a ViewHolder always yields the right index.
@@ -89,15 +89,21 @@ There is no React-internals timing assumption baked in. The only requirement is 
 In [src/recyclerview/ViewHolder.tsx](src/recyclerview/ViewHolder.tsx), inside `CompatContainer` between `{children}` and `{separator}`:
 
 ```tsx
-{children}
-{Platform.OS === "web" && (
-  <div
-    data-flashlist-index={index}
-    aria-hidden
-    style={INVISIBLE_MARKER_STYLE}
-  />
-)}
-{separator}
+{
+  children;
+}
+{
+  Platform.OS === "web" && (
+    <div
+      data-flashlist-index={index}
+      aria-hidden
+      style={INVISIBLE_MARKER_STYLE}
+    />
+  );
+}
+{
+  separator;
+}
 ```
 
 with a module-scope constant:
@@ -175,12 +181,12 @@ Two focusable children at the **same DOM depth** inside the same row (e.g. two s
 
 After the marker + new filters were in place, runtime logging across multiple ~300-event reproductions showed `lastFocusTargetRef` and the `isSameDomTarget` check did **zero unique work**. Every event the DOM-identity check caught was already caught by either `isSameLogicalRow` or `isPhantomMutationFocus`:
 
-| Counterfactual | Newly leaked events |
-| --- | --- |
-| Remove `isSameDomTarget` | 0 |
-| Remove `isSameLogicalRow` | 115 |
-| Remove `isPhantomMutationFocus` | 4 |
-| `focusedIndex === null` events | 0 |
+| Counterfactual                  | Newly leaked events |
+| ------------------------------- | ------------------- |
+| Remove `isSameDomTarget`        | 0                   |
+| Remove `isSameLogicalRow`       | 115                 |
+| Remove `isPhantomMutationFocus` | 4                   |
+| `focusedIndex === null` events  | 0                   |
 
 `focusedIndex === null` never occurred — the marker walk-up never failed across the entire trace, ruling out any need for a DOM-identity fallback. So we removed:
 

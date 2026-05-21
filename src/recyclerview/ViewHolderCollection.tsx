@@ -272,6 +272,11 @@ export const ViewHolderCollection = <TItem,>(
   const lastFocusedDepthRef = useRef<number | null>(null);
   const shouldSortOnNextFocusRef = useRef(false);
   const renderEntriesRef = useRef(Array.from(renderStack.entries()));
+  // Tracks the modality of the user's most recent input ("pointer" vs
+  // "keyboard"). Pointer interactions defer the sync sort to avoid
+  // re-rendering between `mousedown` and `click` (which makes the browser
+  // drop the click).
+  const lastInputModalityRef = useRef<"pointer" | "keyboard">("pointer");
   const [, bumpSortVersion] = useReducer((x: number) => x + 1, 0);
 
   const sortItems = useCallback(() => {
@@ -298,6 +303,16 @@ export const ViewHolderCollection = <TItem,>(
     clearPendingSort();
     if (isScrollingProgrammatically()) {
       runAfterProgrammaticScroll(schedulePendingSort);
+      return;
+    }
+    // Pointer-driven focus: defer the sync sort so we don't reorder the
+    // DOM between `mousedown` and `click` (the browser would drop the
+    // click). The pending sort will commit later via the timer.
+    if (
+      shouldSortOnNextFocusRef.current &&
+      lastInputModalityRef.current === "pointer"
+    ) {
+      schedulePendingSort();
       return;
     }
     if (shouldSortOnNextFocusRef.current) {
@@ -403,6 +418,28 @@ export const ViewHolderCollection = <TItem,>(
     return clearPendingSort;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderStack, renderId]);
+
+  // Track input modality globally. Capture-phase document listeners so
+  // we observe events before any handler can call `stopPropagation()`.
+  // `pointerdown` covers mouse/touch/pen; `keydown` covers Tab and
+  // assistive technologies (e.g. VoiceOver injects keydowns).
+  useEffect(() => {
+    if (Platform.OS !== "web") {
+      return;
+    }
+    const onDocKeyDown = () => {
+      lastInputModalityRef.current = "keyboard";
+    };
+    const onDocPointerDown = () => {
+      lastInputModalityRef.current = "pointer";
+    };
+    document.addEventListener("keydown", onDocKeyDown, true);
+    document.addEventListener("pointerdown", onDocPointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", onDocKeyDown, true);
+      document.removeEventListener("pointerdown", onDocPointerDown, true);
+    };
+  }, []);
 
   return (
     <CompatView ref={containerRef} style={hasData && containerStyle}>
