@@ -101,7 +101,7 @@ const FOCUS_INDUCED_SCROLL_WINDOW_MS = 30;
 function useDeferredCallback(
   callback: () => void,
   delayMs: number,
-  shouldDefer: () => boolean,
+  shouldDefer: () => boolean
 ): readonly [schedule: () => void, cancel: () => void] {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -139,7 +139,7 @@ function useDeferredCallback(
  */
 function findFocusedIndexFromMarker(
   target: Element | null,
-  root: Element | null,
+  root: Element | null
 ): { index: number; depth: number } | null {
   let current: Element | null = target;
   let depth = 0;
@@ -165,7 +165,7 @@ function findFocusedIndexFromMarker(
  * @template TItem - The type of items in the data array
  */
 export const ViewHolderCollection = <TItem,>(
-  props: ViewHolderCollectionProps<TItem>,
+  props: ViewHolderCollectionProps<TItem>
 ) => {
   const {
     data,
@@ -240,7 +240,7 @@ export const ViewHolderCollection = <TItem,>(
         setRenderId((prev) => prev + 1);
       },
     }),
-    [setRenderId],
+    [setRenderId]
   );
 
   const hasData = data && data.length > 0;
@@ -284,19 +284,23 @@ export const ViewHolderCollection = <TItem,>(
     const direction = inverted ? -1 : 1;
     const isSorted = entries.every(
       (entry, i) =>
-        i === 0 || direction * (entries[i - 1][1].index - entry[1].index) <= 0,
+        i === 0 || direction * (entries[i - 1][1].index - entry[1].index) <= 0
     );
     if (isSorted) {
       return;
     }
     entries.sort(([, a], [, b]) => direction * (a.index - b.index));
-    bumpSortVersion();
   }, [inverted]);
 
+  const sortItemsAndReRender = useCallback(() => {
+    sortItems();
+    bumpSortVersion();
+  }, [sortItems]);
+
   const [schedulePendingSort, clearPendingSort] = useDeferredCallback(
-    sortItems,
+    sortItemsAndReRender,
     SORT_DELAY_MS,
-    isScrolling,
+    isScrolling
   );
 
   const maybeDoSortOnFocus = useCallback(() => {
@@ -317,7 +321,7 @@ export const ViewHolderCollection = <TItem,>(
     }
     if (shouldSortOnNextFocusRef.current) {
       shouldSortOnNextFocusRef.current = false;
-      sortItems();
+      sortItemsAndReRender();
     }
     schedulePendingSort();
   }, [
@@ -325,7 +329,7 @@ export const ViewHolderCollection = <TItem,>(
     runAfterProgrammaticScroll,
     schedulePendingSort,
     clearPendingSort,
-    sortItems,
+    sortItemsAndReRender,
   ]);
   const maybeDoSortOnScroll = useCallback(() => {
     shouldSortOnNextFocusRef.current = true;
@@ -346,7 +350,7 @@ export const ViewHolderCollection = <TItem,>(
         scrollSinceFocus >= 0 &&
         scrollSinceFocus < FOCUS_INDUCED_SCROLL_WINDOW_MS;
       if (scrollNow) {
-        sortItems();
+        sortItemsAndReRender();
         shouldSortOnNextFocusRef.current = false;
         return;
       }
@@ -358,7 +362,7 @@ export const ViewHolderCollection = <TItem,>(
     runAfterProgrammaticScroll,
     schedulePendingSort,
     clearPendingSort,
-    sortItems,
+    sortItemsAndReRender,
     getLastScrollTime,
   ]);
 
@@ -366,7 +370,7 @@ export const ViewHolderCollection = <TItem,>(
     // Reconcile: remove stale keys, append new keys
     const existingKeys = new Set(renderEntriesRef.current.map(([key]) => key));
     renderEntriesRef.current = renderEntriesRef.current.filter(([key]) =>
-      renderStack.has(key),
+      renderStack.has(key)
     );
     for (const key of renderStack.keys()) {
       if (!existingKeys.has(key)) {
@@ -375,6 +379,7 @@ export const ViewHolderCollection = <TItem,>(
     }
   } else {
     renderEntriesRef.current = Array.from(renderStack.entries());
+    sortItems();
   }
 
   useEffect(() => {
@@ -387,7 +392,7 @@ export const ViewHolderCollection = <TItem,>(
       // phantoms).
       const focused = findFocusedIndexFromMarker(
         e.target as Element | null,
-        containerRef.current as unknown as Element | null,
+        containerRef.current as unknown as Element | null
       );
       const focusedIndex = focused?.index ?? null;
       const focusedDepth = focused?.depth ?? null;
